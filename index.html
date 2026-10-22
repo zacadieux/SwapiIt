@@ -175,9 +175,10 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
     <div class="field video-only">
       <span class="label">Frame rate</span>
       <select id="optFps">
+        <option value="auto" selected>Same as the video</option>
         <option value="24">24 fps</option>
         <option value="25">25 fps</option>
-        <option value="30" selected>30 fps</option>
+        <option value="30">30 fps</option>
         <option value="60">60 fps</option>
       </select>
     </div>
@@ -537,6 +538,13 @@ ui.videoInput.addEventListener("change", async () => {
     await once(v, "loadedmetadata");
     v.currentTime = Math.min(0.5, v.duration / 2);
     ui.videoMeta.textContent = `${v.videoWidth}×${v.videoHeight} · ${fmtTime(v.duration)} · ${(file.size / 1048576).toFixed(1)} MB`;
+    state.videoFps = null;
+    detectFps(v).then((fps) => {
+      if (v.src !== state.videoURL) return;
+      state.videoFps = fps;
+      ui.videoMeta.textContent += ` · ${fpsLabel(fps)} fps`;
+      v.currentTime = Math.min(0.5, v.duration / 2);
+    });
     ui.videoMeta.className = "meta ok";
   } catch {
     state.videoFile = null;
@@ -545,6 +553,37 @@ ui.videoInput.addEventListener("change", async () => {
   }
   refreshStart();
 });
+
+// Measure the video's own frame rate by timing a few decoded frames.
+const COMMON_FPS = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 119.88, 120];
+const fpsLabel = (f) => (Number.isInteger(f) ? String(f) : f.toFixed(2));
+async function detectFps(v) {
+  if (!v.requestVideoFrameCallback) return 30;
+  const times = [];
+  try {
+    v.muted = true;
+    v.currentTime = 0;
+    await once(v, "seeked");
+    await new Promise((resolve) => {
+      const stop = setTimeout(resolve, 2000);
+      const cb = (_, meta) => {
+        times.push(meta.mediaTime);
+        if (times.length >= 24) { clearTimeout(stop); resolve(); } else v.requestVideoFrameCallback(cb);
+      };
+      v.requestVideoFrameCallback(cb);
+      v.play().catch(() => { clearTimeout(stop); resolve(); });
+    });
+  } catch {}
+  v.pause();
+  const d = [];
+  for (let i = 1; i < times.length; i++) { const x = times[i] - times[i - 1]; if (x > 0.003 && x < 0.2) d.push(x); }
+  if (d.length < 4) return 30;
+  // The smallest steady gap is one frame (larger gaps are skipped frames).
+  d.sort((a, b) => a - b);
+  const frame = d[Math.floor(d.length * 0.25)], raw = 1 / frame;
+  const near = COMMON_FPS.reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a));
+  return Math.abs(near - raw) / raw < 0.04 ? near : Math.round(raw);
+}
 
 function once(el, ev, timeout = 15000) {
   return new Promise((res, rej) => {
@@ -858,7 +897,8 @@ async function run() {
     const vw = video.videoWidth, vh = video.videoHeight;
     const maxH = +ui.size.value || vh, scale = Math.min(1, maxH / Math.min(vw, vh));
     const W = Math.max(2, Math.round(vw * scale / 2) * 2), H = Math.max(2, Math.round(vh * scale / 2) * 2);
-    const fps = +ui.fps.value;
+    if (ui.fps.value === "auto" && !state.videoFps) state.videoFps = await detectFps(ui.videoPreview);
+    const fps = ui.fps.value === "auto" ? state.videoFps || 30 : +ui.fps.value;
     const start = Math.min(Math.max(0, +ui.start.value || 0), Math.max(0, video.duration - 0.1));
     const end = +ui.dur.value > 0 ? Math.min(video.duration, start + +ui.dur.value) : video.duration;
     const total = Math.max(1, Math.floor((end - start) * fps));
@@ -918,14 +958,14 @@ async function exportWebCodecs({ video, W, H, fps, start, end, total, detect, re
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
     target, fastStart: "in-memory", firstTimestampBehavior: "offset",
-    video: { codec: vcodec.mux, width: W, height: H, frameRate: fps },
+    video: { codec: vcodec.mux, width: W, height: H, frameRate: Math.round(fps) },
     ...(acodec ? { audio: { codec: acodec.mux, sampleRate: audio.sr, numberOfChannels: audio.ch } } : {}),
   });
   let encErr = null;
   const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => { encErr = e; } });
   venc.configure({ codec: vcodec.codec, width: W, height: H, bitrate: Math.round(W * H * fps * 0.15), framerate: fps });
 
-  setStatus("Swapping faces…");
+  setStatus(`Swapping faces · ${W}×${H} at ${fpsLabel(fps)} fps, ${fmtTime(end - start)} long…`);
   const t0 = performance.now(), dt = 1e6 / fps;
   for (let i = 0; i < total; i++) {
     if (state.cancel) break;
@@ -935,7 +975,7 @@ async function exportWebCodecs({ video, W, H, fps, start, end, total, detect, re
     const faces = detect();
     renderFrame(video, faces);
     const frame = new VideoFrame(ui.out, { timestamp: Math.round(i * dt), duration: Math.round(dt) });
-    venc.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+    venc.encode(frame, { keyFrame: i % Math.round(fps * 2) === 0 });
     frame.close();
     while (venc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 4));
     progress(i + 1, total, t0, faces.length);
