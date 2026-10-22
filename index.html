@@ -221,6 +221,7 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
       <span class="label">Export as</span>
       <select id="exportFormat" aria-label="Export format"></select>
       <button id="exportBtn">Export</button>
+      <button class="ghost" id="rerenderBtn" title="Run the swap again on the same video or picture, using the current reference photos and settings">Re-render</button>
       <button class="ghost" id="againBtn">Start over</button>
     </div>
   </section>
@@ -259,6 +260,8 @@ function setStatus(text, bad = false) { ui.status.textContent = text; ui.status.
 function refreshStart() {
   const hasTarget = state.mode === "video" ? !!state.videoFile : !!state.target;
   ui.startBtn.disabled = !(state.imgLm && state.sources.length && hasTarget) || state.busy;
+  const rr = document.getElementById("rerenderBtn");
+  if (rr) rr.disabled = ui.startBtn.disabled;
 }
 ui.featherVal.textContent = ui.feather.value + "%"; ui.smoothVal.textContent = ui.smooth.value + "%";
 ui.feather.oninput = () => { ui.featherVal.textContent = ui.feather.value + "%"; state.sources.forEach(buildSourceAlpha); rerenderPicture(); };
@@ -338,6 +341,7 @@ async function addPhotos(files) {
   ui.photoMeta.className = "meta " + (failed.length ? "bad" : "ok");
   refreshStart();
   rerenderPicture();
+  markStale();
 }
 
 function removePhoto(i) {
@@ -349,7 +353,7 @@ function removePhoto(i) {
   const n = state.sources.length;
   ui.photoMeta.textContent = n ? `${n} reference photo${n > 1 ? "s" : ""}` : "JPG, PNG or WebP · select several at once";
   ui.photoMeta.className = "meta" + (n ? " ok" : "");
-  renderRefs(); refreshStart(); rerenderPicture();
+  renderRefs(); refreshStart(); rerenderPicture(); markStale();
 }
 
 function poseLabel(p) {
@@ -974,6 +978,22 @@ ui.exportBtn.addEventListener("click", async () => {
 });
 
 ui.startBtn.addEventListener("click", run);
+
+// Re-run the swap on the chosen video or picture with the current photos and settings.
+$("rerenderBtn").addEventListener("click", () => {
+  if (state.busy) return;
+  if (!state.sources.length) { setStatus("Add at least one reference photo first.", true); return; }
+  run();
+});
+// Tell the user when a finished video no longer reflects the current photos or settings.
+function markStale() {
+  if (state.result?.kind === "video" && !state.busy && !ui.stage.hidden) {
+    setStatus("Photos or settings changed. Click Re-render to apply them to the video.");
+  }
+}
+for (const el of [ui.faces, ui.size, ui.fps, ui.start, ui.dur, ui.feather, ui.smooth, ui.color, ui.mouth, ui.refMode]) {
+  el.addEventListener("change", markStale);
+}
 ui.cancelBtn.addEventListener("click", () => { state.cancel = true; setStatus("Stopping…"); });
 ui.againBtn.addEventListener("click", () => { ui.stage.hidden = true; ui.doneActions.hidden = true; window.scrollTo({ top: 0 }); });
 for (const id of ["dropPhoto", "dropVideo"]) {
