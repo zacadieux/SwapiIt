@@ -66,7 +66,7 @@ h1 { font: 800 clamp(2rem, 5vw, 3.2rem)/1.02 var(--f-display); letter-spacing: -
 .drop p { margin: 0; color: var(--muted); font-size: .92rem; }
 .drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .thumb { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; background: var(--stage); border-radius: 10px; overflow: hidden; display: grid; place-items: center; }
-.thumb canvas, .thumb video { max-width: 100%; max-height: 100%; display: block; }
+.thumb canvas, .thumb video, .thumb img { max-width: 100%; max-height: 100%; display: block; }
 .meta { font: 400 .8rem/1.4 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
 .meta.ok { color: var(--ok); } .meta.bad { color: var(--bad); }
 
@@ -100,6 +100,25 @@ button:focus-visible, .btn:focus-visible, select:focus-visible, input:focus-visi
 .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 .readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 .85rem var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .readout b { color: var(--ink); font-weight: 600; }
+.pick { position: relative; cursor: pointer; }
+.refs { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+.ref { position: relative; display: grid; gap: 4px; min-width: 0; }
+.ref .refpick { padding: 0; border: 2px solid var(--line); background: var(--stage); border-radius: 10px; overflow: hidden; aspect-ratio: 1; display: grid; place-items: center; }
+.ref.sel .refpick { border-color: var(--accent); }
+.ref canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ref .pose { font: 400 .68rem/1.2 var(--f-mono); color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.ref.used .pose { color: var(--accent); font-weight: 600; }
+.ref .refdel { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border-radius: 50%; font: 700 .85rem/1 var(--f-body); background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.addref { border: 2px dashed var(--line); border-radius: 10px; aspect-ratio: 1; display: grid; place-items: center; color: var(--muted); font: 700 1.4rem/1 var(--f-body); position: relative; cursor: pointer; }
+.addref:hover, .addref:focus-within { border-color: var(--accent); color: var(--accent); }
+.modes { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; gap: 4px; justify-self: start; max-width: 100%; }
+.modes label { position: relative; cursor: pointer; }
+.modes input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.modes span { display: block; padding: 9px 18px; border-radius: 999px; font: 700 .95rem/1 var(--f-body); color: var(--muted); }
+.modes input:checked + span { background: var(--accent); color: var(--accent-ink); }
+.modes input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+.export { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.export select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; max-width: 100%; }
 footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 16px; max-width: 70ch; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -109,25 +128,31 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
   <header>
     <span class="label">Runs in your browser · nothing is uploaded</span>
     <h1>Face Swap Studio</h1>
-    <p class="lede">Pick a photo of a face and a video. Every face the video shows is mapped to 478 landmarks, and the photo's face is warped onto it frame by frame, matching pose, expression and skin tone.</p>
+    <p class="lede">Add one or more photos of the new face, then a video or another picture. Every face in the target is mapped to 478 landmarks, and the photo's face is warped onto it frame by frame, matching pose, expression and skin tone.</p>
   </header>
 
+  <div class="modes" role="radiogroup" aria-label="Swap the face into">
+    <label><input type="radio" name="mode" value="video" checked><span>Into a video</span></label>
+    <label><input type="radio" name="mode" value="picture"><span>Into a picture</span></label>
+  </div>
+
   <section class="inputs">
-    <label class="drop" id="dropPhoto">
+    <div class="drop" id="dropPhoto">
       <span class="label">1 · New face</span>
-      <h2>Photo</h2>
-      <p>A clear, front-facing, evenly lit photo works best.</p>
-      <div class="thumb"><canvas id="photoCanvas" width="400" height="300"></canvas></div>
-      <div class="meta" id="photoMeta">JPG, PNG or WebP</div>
-      <input type="file" id="photoInput" accept="image/*" aria-label="Choose photo">
-    </label>
+      <h2>Reference photos</h2>
+      <p>Add one photo, or several of the same person from different angles. Each frame then uses the photo whose head angle matches best.</p>
+      <label class="thumb pick"><canvas id="photoCanvas" width="400" height="300"></canvas><input type="file" id="photoInput" accept="image/*" multiple aria-label="Add reference photos"></label>
+      <div class="meta" id="photoMeta">JPG, PNG or WebP · select several at once</div>
+      <div class="refs" id="refs" hidden></div>
+    </div>
     <label class="drop" id="dropVideo">
-      <span class="label">2 · Footage</span>
-      <h2>Video</h2>
-      <p>MP4, MOV or WebM. Try a short clip first.</p>
-      <div class="thumb"><video id="videoPreview" muted playsinline preload="auto"></video></div>
+      <span class="label">2 · Where it goes</span>
+      <h2 id="targetTitle">Video</h2>
+      <p id="targetHint">MP4, MOV or WebM. Try a short clip first.</p>
+      <div class="thumb"><video id="videoPreview" muted playsinline preload="auto"></video><img id="targetPreview" alt="Target picture" hidden></div>
       <div class="meta" id="videoMeta">No video selected</div>
-      <input type="file" id="videoInput" accept="video/*" aria-label="Choose video">
+      <div class="meta" id="targetMeta" hidden>No picture selected</div>
+      <input type="file" id="videoInput" accept="video/*,image/*" aria-label="Choose video or picture">
     </label>
   </section>
 
@@ -139,7 +164,7 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
         <option value="5">Every face (up to 5)</option>
       </select>
     </div>
-    <div class="field">
+    <div class="field video-only">
       <span class="label">Output size</span>
       <select id="optSize">
         <option value="720">Up to 720p</option>
@@ -147,7 +172,7 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
         <option value="0">Original</option>
       </select>
     </div>
-    <div class="field">
+    <div class="field video-only">
       <span class="label">Frame rate</span>
       <select id="optFps">
         <option value="24">24 fps</option>
@@ -156,23 +181,30 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
         <option value="60">60 fps</option>
       </select>
     </div>
-    <div class="field">
+    <div class="field video-only">
       <span class="label">Start / length (seconds, 0 = all)</span>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <input type="number" id="optStart" min="0" step="0.5" value="0" aria-label="Start time in seconds">
         <input type="number" id="optDur" min="0" step="0.5" value="0" aria-label="Length in seconds">
       </div>
     </div>
+    <div class="field" id="refField" hidden>
+      <span class="label">Which reference photo</span>
+      <select id="optRef">
+        <option value="auto" selected>Best match for each frame</option>
+        <option value="selected">Only the highlighted photo</option>
+      </select>
+    </div>
     <div class="field">
       <span class="label">Edge softness <span class="rangeval" id="featherVal"></span></span>
       <input type="range" id="optFeather" min="2" max="30" value="12">
     </div>
-    <div class="field">
+    <div class="field video-only">
       <span class="label">Steadiness <span class="rangeval" id="smoothVal"></span></span>
       <input type="range" id="optSmooth" min="0" max="90" value="50">
     </div>
-    <label class="check"><input type="checkbox" id="optColor" checked><span>Match skin tone<small>Adapts the face to the video's lighting.</small></span></label>
-    <label class="check"><input type="checkbox" id="optMouth" checked><span>Keep the video's mouth<small>Shows real teeth and tongue when the person talks.</small></span></label>
+    <label class="check"><input type="checkbox" id="optColor" checked><span>Match skin tone<small>Adapts the face to the target's lighting.</small></span></label>
+    <label class="check"><input type="checkbox" id="optMouth" checked><span>Keep the original mouth<small>Shows the target's own teeth and tongue when the mouth is open.</small></span></label>
   </section>
 
   <div class="actions">
@@ -185,9 +217,11 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
     <div class="screen"><canvas id="out"></canvas><video id="result" controls playsinline hidden></video></div>
     <div class="bar"><i id="barFill"></i></div>
     <div class="readout" id="readout"></div>
-    <div class="actions" id="doneActions" hidden>
-      <a class="btn" id="downloadLink" download="faceswap.mp4">Download video</a>
-      <button class="ghost" id="againBtn">Make another</button>
+    <div class="export" id="doneActions" hidden>
+      <span class="label">Export as</span>
+      <select id="exportFormat" aria-label="Export format"></select>
+      <button id="exportBtn">Export</button>
+      <button class="ghost" id="againBtn">Start over</button>
     </div>
   </section>
 
@@ -211,18 +245,23 @@ const ui = {
   photoInput: $("photoInput"), videoInput: $("videoInput"), photoCanvas: $("photoCanvas"), photoMeta: $("photoMeta"),
   videoPreview: $("videoPreview"), videoMeta: $("videoMeta"), startBtn: $("startBtn"), cancelBtn: $("cancelBtn"),
   status: $("status"), stage: $("stage"), out: $("out"), result: $("result"), barFill: $("barFill"),
-  readout: $("readout"), doneActions: $("doneActions"), downloadLink: $("downloadLink"), againBtn: $("againBtn"),
+  readout: $("readout"), doneActions: $("doneActions"), exportFormat: $("exportFormat"), exportBtn: $("exportBtn"), againBtn: $("againBtn"),
+  targetPreview: $("targetPreview"), targetMeta: $("targetMeta"), targetTitle: $("targetTitle"), targetHint: $("targetHint"),
   faces: $("optFaces"), size: $("optSize"), fps: $("optFps"), start: $("optStart"), dur: $("optDur"),
   feather: $("optFeather"), smooth: $("optSmooth"), color: $("optColor"), mouth: $("optMouth"),
-  featherVal: $("featherVal"), smoothVal: $("smoothVal"),
+  featherVal: $("featherVal"), smoothVal: $("smoothVal"), refs: $("refs"), refField: $("refField"), refMode: $("optRef"),
 };
 
-const state = { imgLm: null, vidLm: null, vidLmFaces: 0, photo: null, source: null, videoFile: null, videoURL: null, cancel: false, busy: false };
+const state = { sources: [], selected: 0, lastRefs: [], imgLm: null, picLm: null, vidLm: null, vidLmFaces: 0, photo: null, source: null, videoFile: null, videoURL: null,
+  target: null, mode: "video", result: null, renderer: null, cancel: false, busy: false };
 
 function setStatus(text, bad = false) { ui.status.textContent = text; ui.status.classList.toggle("bad", bad); }
-function refreshStart() { ui.startBtn.disabled = !(state.imgLm && state.source && state.videoFile) || state.busy; }
+function refreshStart() {
+  const hasTarget = state.mode === "video" ? !!state.videoFile : !!state.target;
+  ui.startBtn.disabled = !(state.imgLm && state.sources.length && hasTarget) || state.busy;
+}
 ui.featherVal.textContent = ui.feather.value + "%"; ui.smoothVal.textContent = ui.smooth.value + "%";
-ui.feather.oninput = () => { ui.featherVal.textContent = ui.feather.value + "%"; if (state.source) buildSourceAlpha(); };
+ui.feather.oninput = () => { ui.featherVal.textContent = ui.feather.value + "%"; state.sources.forEach(buildSourceAlpha); rerenderPicture(); };
 ui.smooth.oninput = () => { ui.smoothVal.textContent = ui.smooth.value + "%"; };
 
 // ---------------------------------------------------------------- model ---
@@ -262,45 +301,118 @@ function toArray(lms) {
   return a;
 }
 
-// ---------------------------------------------------------------- photo ---
-ui.photoInput.addEventListener("change", async () => {
-  const file = ui.photoInput.files[0];
-  if (!file) return;
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  try { await img.decode(); } catch { ui.photoMeta.textContent = "That file isn't an image this browser can open."; ui.photoMeta.className = "meta bad"; return; }
-  state.photo = img;
-  $("dropPhoto").classList.add("filled");
-  if (!state.imgLm) { ui.photoMeta.textContent = "Waiting for the face model…"; return; }
-  const res = state.imgLm.detect(img);
-  if (!res.faceLandmarks.length) {
-    state.source = null;
-    drawPhotoPreview(img, null);
-    ui.photoMeta.textContent = "No face found. Try a clearer, front-facing photo.";
-    ui.photoMeta.className = "meta bad";
-  } else {
-    const pts = toArray(res.faceLandmarks[0]);
-    state.source = { img, pts, w: img.naturalWidth, h: img.naturalHeight };
-    state.tris = triangulate(pts, img.naturalWidth, img.naturalHeight);
-    buildSourceAlpha();
-    state.source.stats = regionStats(img, pts, img.naturalWidth, img.naturalHeight);
-    drawPhotoPreview(img, pts);
-    ui.photoMeta.textContent = `Face found · ${res.faceLandmarks[0].length} landmarks · ${state.tris.length / 3} triangles`;
-    ui.photoMeta.className = "meta ok";
-  }
-  refreshStart();
+// --------------------------------------------------------------- photos ---
+ui.photoInput.addEventListener("change", async () => { await addPhotos([...ui.photoInput.files]); ui.photoInput.value = ""; });
+const dropPhoto = $("dropPhoto");
+dropPhoto.addEventListener("dragover", (e) => { e.preventDefault(); dropPhoto.classList.add("over"); });
+dropPhoto.addEventListener("dragleave", () => dropPhoto.classList.remove("over"));
+dropPhoto.addEventListener("drop", (e) => {
+  e.preventDefault(); dropPhoto.classList.remove("over");
+  addPhotos([...e.dataTransfer.files].filter((f) => f.type.startsWith("image/")));
 });
 
-function drawPhotoPreview(img, pts) {
+async function addPhotos(files) {
+  if (!files.length) return;
+  if (!state.imgLm) { ui.photoMeta.textContent = "Waiting for the face model…"; return; }
+  let added = 0, failed = [];
+  for (const file of files) {
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    try { await img.decode(); } catch { failed.push(file.name); continue; }
+    const res = state.imgLm.detect(img);
+    if (!res.faceLandmarks.length) { failed.push(file.name); URL.revokeObjectURL(img.src); continue; }
+    const pts = toArray(res.faceLandmarks[0]), w = img.naturalWidth, h = img.naturalHeight;
+    const src = { img, pts, w, h, name: file.name, tris: triangulate(pts, w, h), pose: facePose(pts) };
+    buildSourceAlpha(src);
+    src.stats = regionStats(img, pts, w, h);
+    state.sources.push(src);
+    added++;
+  }
+  if (added) state.selected = state.sources.length - 1;
+  dropPhoto.classList.toggle("filled", state.sources.length > 0);
+  renderRefs();
+  const n = state.sources.length;
+  let msg = n ? `${n} reference photo${n > 1 ? "s" : ""} · 478 landmarks each` : "No reference photos yet";
+  if (failed.length) msg += ` · no face found in ${failed.join(", ")}`;
+  ui.photoMeta.textContent = msg;
+  ui.photoMeta.className = "meta " + (failed.length ? "bad" : "ok");
+  refreshStart();
+  rerenderPicture();
+}
+
+function removePhoto(i) {
+  const [src] = state.sources.splice(i, 1);
+  URL.revokeObjectURL(src.img.src);
+  state.selected = Math.min(state.selected, state.sources.length - 1);
+  if (state.selected < 0) state.selected = 0;
+  dropPhoto.classList.toggle("filled", state.sources.length > 0);
+  const n = state.sources.length;
+  ui.photoMeta.textContent = n ? `${n} reference photo${n > 1 ? "s" : ""}` : "JPG, PNG or WebP · select several at once";
+  ui.photoMeta.className = "meta" + (n ? " ok" : "");
+  renderRefs(); refreshStart(); rerenderPicture();
+}
+
+function poseLabel(p) {
+  const parts = [];
+  parts.push(Math.abs(p.yaw) < 0.07 ? "front" : p.yaw > 0 ? "turned →" : "turned ←");
+  if (p.pitch > 0.07) parts.push("down"); else if (p.pitch < -0.07) parts.push("up");
+  if (p.mouth > 0.08) parts.push("mouth open");
+  return parts.join(" · ");
+}
+
+function renderRefs() {
+  const n = state.sources.length;
+  ui.refs.hidden = n === 0;
+  ui.refField.hidden = n < 2;
+  ui.refs.innerHTML = "";
+  state.sources.forEach((src, i) => {
+    const el = document.createElement("div");
+    el.className = "ref" + (i === state.selected ? " sel" : "") + (state.lastRefs.includes(i) ? " used" : "");
+    const pick = document.createElement("button");
+    pick.className = "refpick"; pick.type = "button"; pick.title = src.name;
+    pick.setAttribute("aria-label", `Show ${src.name}`);
+    const c = document.createElement("canvas");
+    // Crop the thumbnail to the face.
+    let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+    for (const k of FACE_OVAL) { x0 = Math.min(x0, src.pts[2 * k]); x1 = Math.max(x1, src.pts[2 * k]); y0 = Math.min(y0, src.pts[2 * k + 1]); y1 = Math.max(y1, src.pts[2 * k + 1]); }
+    const side = Math.max((x1 - x0) * src.w, (y1 - y0) * src.h) * 1.15;
+    const cx = (x0 + x1) / 2 * src.w, cy = (y0 + y1) / 2 * src.h;
+    c.width = c.height = 128;
+    c.getContext("2d").drawImage(src.img, cx - side / 2, cy - side / 2, side, side, 0, 0, 128, 128);
+    pick.appendChild(c);
+    pick.onclick = () => { state.selected = i; renderRefs(); rerenderPicture(); };
+    const del = document.createElement("button");
+    del.className = "refdel"; del.type = "button"; del.textContent = "×";
+    del.setAttribute("aria-label", `Remove ${src.name}`);
+    del.onclick = () => removePhoto(i);
+    const pose = document.createElement("span");
+    pose.className = "pose"; pose.textContent = `${i + 1} · ${poseLabel(src.pose)}`;
+    el.append(pick, del, pose);
+    ui.refs.appendChild(el);
+  });
+  const add = document.createElement("label");
+  add.className = "addref"; add.title = "Add more photos"; add.textContent = "+";
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*"; inp.multiple = true;
+  inp.setAttribute("aria-label", "Add more reference photos");
+  inp.style.cssText = "position:absolute;inset:0;opacity:0;cursor:pointer";
+  inp.onchange = () => addPhotos([...inp.files]);
+  add.appendChild(inp);
+  if (n) ui.refs.appendChild(add);
+  const sel = state.sources[state.selected];
+  if (sel) drawPhotoPreview(sel);
+  else { const ctx = ui.photoCanvas.getContext("2d"); ctx.clearRect(0, 0, ui.photoCanvas.width, ui.photoCanvas.height); }
+}
+
+function drawPhotoPreview(src) {
+  const { img, pts, tris: t } = src;
   const c = ui.photoCanvas, ctx = c.getContext("2d");
   const s = Math.min(800 / img.naturalWidth, 600 / img.naturalHeight, 1);
   c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
   ctx.drawImage(img, 0, 0, c.width, c.height);
-  if (!pts) return;
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2b50d8";
   ctx.globalAlpha = 0.55; ctx.lineWidth = 0.6;
   ctx.beginPath();
-  const t = state.tris;
   for (let i = 0; i < t.length; i += 3) {
     const a = t[i], b = t[i + 1], d = t[i + 2];
     ctx.moveTo(pts[2 * a] * c.width, pts[2 * a + 1] * c.height);
@@ -311,6 +423,18 @@ function drawPhotoPreview(img, pts) {
   ctx.stroke(); ctx.globalAlpha = 1;
 }
 
+// Rough head pose from landmarks: yaw (left/right), pitch (up/down), mouth opening.
+function facePose(f) {
+  const x = (i) => f[2 * i], y = (i) => f[2 * i + 1];
+  const fw = (x(454) - x(234)) || 1e-6, fh = (y(152) - y(10)) || 1e-6;
+  return {
+    yaw: (x(1) - x(234)) / fw - 0.5,
+    pitch: (y(1) - y(10)) / fh - 0.55,
+    mouth: Math.hypot(x(13) - x(14), y(13) - y(14)) / Math.abs(fh),
+  };
+}
+const poseDist = (a, b) => 2.5 * Math.abs(a.yaw - b.yaw) + 1.5 * Math.abs(a.pitch - b.pitch) + Math.abs(a.mouth - b.mouth);
+
 function triangulate(pts, w, h) {
   const coords = new Float64Array(MESH_N * 2);
   for (let i = 0; i < MESH_N; i++) { coords[2 * i] = pts[2 * i] * w; coords[2 * i + 1] = pts[2 * i + 1] * h; }
@@ -318,8 +442,8 @@ function triangulate(pts, w, h) {
 }
 
 // Per-vertex opacity: 0 on the face outline, rising to 1 inward, for a soft edge.
-function buildSourceAlpha() {
-  const { pts, w, h } = state.source;
+function buildSourceAlpha(src) {
+  const { pts, w, h } = src;
   const P = (i) => [pts[2 * i] * w, pts[2 * i + 1] * h];
   let minX = 1e9, maxX = -1e9;
   for (const i of FACE_OVAL) { const [x] = P(i); minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
@@ -337,7 +461,7 @@ function buildSourceAlpha() {
     const u = Math.min(1, d / Math.max(feather, 1e-3));
     alpha[i] = u * u * (3 - 2 * u);
   }
-  state.source.alpha = alpha;
+  src.alpha = alpha;
 }
 
 // Mean and spread of color inside the face outline (RGB, 0..1).
@@ -378,6 +502,8 @@ function regionStats(el, pts, w, h) {
 ui.videoInput.addEventListener("change", async () => {
   const file = ui.videoInput.files[0];
   if (!file) return;
+  if (file.type.startsWith("image/")) { setMode("picture"); await loadTargetPicture(file); return; }
+  setMode("video");
   if (state.videoURL) URL.revokeObjectURL(state.videoURL);
   state.videoFile = file;
   state.videoURL = URL.createObjectURL(file);
@@ -405,6 +531,7 @@ function once(el, ev, timeout = 15000) {
     el.addEventListener(ev, ok); el.addEventListener("error", bad);
   });
 }
+const elDims = (el) => el.videoWidth ? [el.videoWidth, el.videoHeight] : [el.naturalWidth, el.naturalHeight];
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 // ---------------------------------------------------------------- WebGL ---
@@ -494,24 +621,38 @@ function faceArea(f) {
 }
 
 function makeFrameRenderer(renderer, opts) {
-  const src = state.source, tris = state.tris;
-  const uv = src.pts.slice(0, MESH_N * 2);
+  const sources = state.sources, fixed = ui.refMode.value === "selected" || sources.length < 2;
+  const uvs = sources.map((s) => s.pts.slice(0, MESH_N * 2));
+  const texs = sources.map((s) => { const t = renderer.makeTex(); renderer.upload(t, s.img); return t; });
+  const chosen = new Map(); // tracked slot -> reference index, so the choice doesn't flicker
+  const pickRef = (f, slot) => {
+    if (fixed) return Math.min(state.selected, sources.length - 1);
+    const p = facePose(f);
+    let best = 0, bestD = Infinity;
+    sources.forEach((s, i) => { const d = poseDist(p, s.pose); if (d < bestD) { best = i; bestD = d; } });
+    const cur = chosen.get(slot);
+    if (cur !== undefined && cur < sources.length && poseDist(p, sources[cur].pose) < bestD + 0.05) best = cur;
+    chosen.set(slot, best);
+    return best;
+  };
   const mouthIdx = new Uint16Array(INNER_LIPS.length * 3);
   INNER_LIPS.forEach((_, k) => { mouthIdx.set([INNER_LIPS.length, k, (k + 1) % INNER_LIPS.length], k * 3); });
   const colorEMA = new Map(); // per tracked slot
-  renderer.upload(renderer.texSrc, src.img);
 
-  return function renderFrame(videoEl, faces) {
+  const renderFrame = function (videoEl, faces) {
+    const used = [];
     const W = renderer.canvas.width, H = renderer.canvas.height;
     renderer.upload(renderer.texFrame, videoEl);
     renderer.drawFrame();
     faces.forEach((f, slot) => {
       if (faceArea(f) < 0.0004) return;
+      const ri = pickRef(f, slot), src = sources[ri];
+      used.push(ri);
       const pos = new Float32Array(MESH_N * 2);
       for (let i = 0; i < MESH_N; i++) { pos[2 * i] = f[2 * i] * W; pos[2 * i + 1] = f[2 * i + 1] * H; }
       let gain = [1, 1, 1], off = [0, 0, 0];
       if (opts.color && src.stats) {
-        const t = regionStats(videoEl, f, videoEl.videoWidth, videoEl.videoHeight);
+        const t = regionStats(videoEl, f, ...elDims(videoEl));
         if (t) {
           const prev = colorEMA.get(slot);
           const m = prev ? t.mean.map((v, c) => 0.7 * prev.mean[c] + 0.3 * v) : t.mean;
@@ -521,7 +662,7 @@ function makeFrameRenderer(renderer, opts) {
           off = m.map((v, c) => v - src.stats.mean[c] * gain[c]);
         }
       }
-      renderer.draw(renderer.texSrc, pos, uv, src.alpha, tris, gain, off);
+      renderer.draw(texs[ri], pos, uvs[ri], src.alpha, src.tris, gain, off);
       if (opts.mouth) {
         const n = INNER_LIPS.length, mp = new Float32Array((n + 1) * 2), muv = new Float32Array((n + 1) * 2);
         let cx = 0, cy = 0;
@@ -531,7 +672,11 @@ function makeFrameRenderer(renderer, opts) {
         renderer.draw(renderer.texFrame, mp, muv, new Float32Array(n + 1).fill(1), mouthIdx);
       }
     });
+    state.lastRefs = [...new Set(used)];
+    return used;
   };
+  renderFrame.dispose = () => texs.forEach((t) => renderer.gl.deleteTexture(t));
+  return renderFrame;
 }
 
 // --------------------------------------------------------------- export ---
@@ -561,6 +706,7 @@ async function pickAudioCodec(sr, ch) {
 }
 
 async function run() {
+  if (state.mode === "picture") return runPicture();
   state.busy = true; state.cancel = false; refreshStart();
   ui.cancelBtn.hidden = false; ui.stage.hidden = false; ui.doneActions.hidden = true;
   ui.result.hidden = true; ui.out.hidden = false; ui.barFill.style.width = "0";
@@ -580,7 +726,7 @@ async function run() {
     const total = Math.max(1, Math.floor((end - start) * fps));
 
     const lm = await getVideoLandmarker(+ui.faces.value === 1 ? 2 : +ui.faces.value);
-    const renderer = new Renderer(ui.out);
+    const renderer = (state.renderer ??= new Renderer(ui.out));
     renderer.setSize(W, H);
     const renderFrame = makeFrameRenderer(renderer, { color: ui.color.checked, mouth: ui.mouth.checked });
     const smoother = new Smoother(+ui.smooth.value / 100);
@@ -600,12 +746,13 @@ async function run() {
     } else {
       ({ blob, type } = await exportRealtime({ video, fps, start, end, total, detect, renderFrame }));
     }
+    renderFrame.dispose();
     if (state.cancel) { setStatus("Stopped."); return; }
+    if (state.result?.url) URL.revokeObjectURL(state.result.url);
     const url = URL.createObjectURL(blob);
+    state.result = { kind: "video", blob, url, ext: type.includes("webm") ? "webm" : "mp4" };
     ui.result.src = url; ui.result.hidden = false; ui.out.hidden = true;
-    ui.downloadLink.href = url;
-    ui.downloadLink.download = type.includes("webm") ? "faceswap.webm" : "faceswap.mp4";
-    ui.doneActions.hidden = false;
+    showExport();
     ui.barFill.style.width = "100%";
     setStatus(`Done · ${(blob.size / 1048576).toFixed(1)} MB`);
   } catch (e) {
@@ -621,7 +768,7 @@ function progress(i, total, t0, faces) {
   const el = (performance.now() - t0) / 1000, rate = i / Math.max(el, 1e-3);
   ui.barFill.style.width = (100 * i / total).toFixed(1) + "%";
   ui.readout.innerHTML = `<span>frame <b>${i}</b> / ${total}</span><span><b>${rate.toFixed(1)}</b> fps</span>` +
-    `<span>faces <b>${faces}</b></span><span>left <b>${fmtTime(Math.max(0, (total - i) / Math.max(rate, 0.01)))}</b></span>`;
+    `<span>faces <b>${faces}</b></span>` + (state.sources.length > 1 ? `<span>photo <b>${state.lastRefs.map((r) => r + 1).join(", ") || "–"}</b></span>` : "") + `<span>left <b>${fmtTime(Math.max(0, (total - i) / Math.max(rate, 0.01)))}</b></span>`;
 }
 
 async function exportWebCodecs({ video, W, H, fps, start, end, total, detect, renderFrame }) {
@@ -714,9 +861,121 @@ async function exportRealtime({ video, fps, start, end, total, detect, renderFra
   return { blob: new Blob(chunks, { type }), type };
 }
 
+// --------------------------------------------------------- picture mode ---
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelector(`input[name=mode][value=${mode}]`).checked = true;
+  const pic = mode === "picture";
+  ui.targetTitle.textContent = pic ? "Picture" : "Video";
+  ui.targetHint.textContent = pic ? "A photo with one or more faces to replace." : "MP4, MOV or WebM. Try a short clip first.";
+  ui.videoInput.accept = pic ? "image/*,video/*" : "video/*,image/*";
+  ui.videoPreview.hidden = pic; ui.videoMeta.hidden = pic;
+  ui.targetPreview.hidden = !pic || !state.target; ui.targetMeta.hidden = !pic;
+  $("dropVideo").classList.toggle("filled", pic ? !!state.target : !!state.videoFile);
+  document.querySelectorAll(".video-only").forEach((el) => { el.hidden = pic; });
+    if (!state.busy) { ui.stage.hidden = true; }
+  refreshStart();
+}
+document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", () => setMode(r.value)));
+
+async function loadTargetPicture(file) {
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  try { await img.decode(); }
+  catch { ui.targetMeta.textContent = "That file isn't an image this browser can open."; ui.targetMeta.className = "meta bad"; return; }
+  if (state.target) URL.revokeObjectURL(state.target.src);
+  state.target = img;
+  ui.targetPreview.src = img.src; ui.targetPreview.hidden = false;
+  $("dropVideo").classList.add("filled");
+  ui.targetMeta.textContent = `${img.naturalWidth}×${img.naturalHeight} · ${(file.size / 1048576).toFixed(1)} MB`;
+  ui.targetMeta.className = "meta ok";
+  ui.stage.hidden = true;
+  refreshStart();
+}
+
+async function runPicture() {
+  state.busy = true; refreshStart();
+  try {
+    state.picLm ??= await makeLandmarker("IMAGE", 5);
+    const img = state.target;
+    let faces = state.picLm.detect(img).faceLandmarks.map(toArray);
+    if (!faces.length) { setStatus("No face found in the target picture.", true); ui.stage.hidden = true; return; }
+    if (+ui.faces.value === 1 && faces.length > 1) faces = [faces.reduce((a, b) => faceArea(a) >= faceArea(b) ? a : b)];
+    state.pictureFaces = faces;
+    drawPicture();
+    ui.stage.hidden = false; ui.out.hidden = false; ui.result.hidden = true;
+    ui.barFill.style.width = "100%";
+    ui.readout.innerHTML = `<span>faces replaced <b>${faces.length}</b></span>${state.sources.length > 1 ? `<span>photo <b>${state.lastRefs.map((r) => r + 1).join(", ")}</b></span>` : ""}<span><b>${ui.out.width}×${ui.out.height}</b> px</span><span>settings update the result live</span>`;
+    state.result = { kind: "picture" };
+    showExport();
+    setStatus("Done. Adjust the settings to fine-tune, then export.");
+    ui.stage.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  } catch (e) {
+    console.error(e);
+    setStatus("Something went wrong: " + (e.message || e), true);
+  } finally { state.busy = false; refreshStart(); }
+}
+
+function drawPicture() {
+  const img = state.target, maxSide = 4096;
+  const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const renderer = (state.renderer ??= new Renderer(ui.out));
+  renderer.setSize(Math.round(img.naturalWidth * s), Math.round(img.naturalHeight * s));
+  const rf = makeFrameRenderer(renderer, { color: ui.color.checked, mouth: ui.mouth.checked });
+  rf(img, state.pictureFaces);
+  rf.dispose();
+  renderRefs();
+}
+
+// Picture results update live when the look settings change.
+function rerenderPicture() {
+  if (state.mode === "picture" && state.result?.kind === "picture" && !ui.stage.hidden && state.pictureFaces && state.sources.length) drawPicture();
+}
+ui.color.addEventListener("change", rerenderPicture);
+ui.mouth.addEventListener("change", rerenderPicture);
+ui.refMode.addEventListener("change", rerenderPicture);
+ui.faces.addEventListener("change", () => { if (state.mode === "picture" && state.result?.kind === "picture" && !ui.stage.hidden) runPicture(); });
+
+// --------------------------------------------------------------- export ---
+function showExport() {
+  const opts = state.result.kind === "video"
+    ? [[state.result.ext, `Video (${state.result.ext.toUpperCase()})`], ["frame-png", "Current frame (PNG)"], ["frame-jpg", "Current frame (JPG)"]]
+    : [["png", "PNG (best quality)"], ["jpg", "JPG (smaller file)"], ["webp", "WebP"]];
+  ui.exportFormat.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+  ui.doneActions.hidden = false;
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+const canvasBlob = (canvas, type, q) => new Promise((res, rej) => canvas.toBlob((b) => b ? res(b) : rej(new Error("Export failed")), type, q));
+const MIME = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+
+ui.exportBtn.addEventListener("click", async () => {
+  const fmt = ui.exportFormat.value, r = state.result;
+  if (!r) return;
+  try {
+    if (r.kind === "video" && !fmt.startsWith("frame")) {
+      saveBlob(r.blob, `faceswap-${stamp()}.${r.ext}`);
+    } else if (r.kind === "video") {
+      const ext = fmt.split("-")[1], v = ui.result, c = document.createElement("canvas");
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext("2d").drawImage(v, 0, 0);
+      saveBlob(await canvasBlob(c, MIME[ext], 0.92), `faceswap-frame-${v.currentTime.toFixed(2)}s.${ext}`);
+    } else {
+      drawPicture(); // make sure the canvas holds the latest render
+      saveBlob(await canvasBlob(ui.out, MIME[fmt], 0.92), `faceswap-${stamp()}.${fmt}`);
+    }
+    setStatus("Exported.");
+  } catch (e) { setStatus("Export failed: " + (e.message || e), true); }
+});
+
 ui.startBtn.addEventListener("click", run);
 ui.cancelBtn.addEventListener("click", () => { state.cancel = true; setStatus("Stopping…"); });
-ui.againBtn.addEventListener("click", () => { ui.stage.hidden = true; window.scrollTo({ top: 0 }); });
+ui.againBtn.addEventListener("click", () => { ui.stage.hidden = true; ui.doneActions.hidden = true; window.scrollTo({ top: 0 }); });
 for (const id of ["dropPhoto", "dropVideo"]) {
   const el = $(id);
   el.addEventListener("dragover", () => el.classList.add("over"));
