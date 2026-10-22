@@ -148,7 +148,7 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
     <label class="drop" id="dropVideo">
       <span class="label">2 · Where it goes</span>
       <h2 id="targetTitle">Video</h2>
-      <p id="targetHint">MP4, MOV or WebM. Try a short clip first.</p>
+      <p id="targetHint">MP4, MOV or WebM. You'll get a copy of it with the face replaced.</p>
       <div class="thumb"><video id="videoPreview" muted playsinline preload="auto"></video><img id="targetPreview" alt="Target picture" hidden></div>
       <div class="meta" id="videoMeta">No video selected</div>
       <div class="meta" id="targetMeta" hidden>No picture selected</div>
@@ -222,7 +222,8 @@ footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--lin
   </section>
 
   <div class="actions">
-    <button id="startBtn" disabled>Swap faces</button>
+    <button id="startBtn" disabled>Make face-swapped copy</button>
+    <label class="check" style="align-items:center"><input type="checkbox" id="optAutoSave" checked><span>Save the copy automatically when it's finished</span></label>
     <button id="cancelBtn" class="ghost" hidden>Stop</button>
     <span class="status" id="status">Loading face model…</span>
   </div>
@@ -264,7 +265,7 @@ const ui = {
   targetPreview: $("targetPreview"), targetMeta: $("targetMeta"), targetTitle: $("targetTitle"), targetHint: $("targetHint"),
   faces: $("optFaces"), size: $("optSize"), fps: $("optFps"), start: $("optStart"), dur: $("optDur"),
   feather: $("optFeather"), smooth: $("optSmooth"), color: $("optColor"), mouth: $("optMouth"), like: $("optLike"), likeVal: $("likeVal"),
-  featherVal: $("featherVal"), smoothVal: $("smoothVal"), refs: $("refs"), refField: $("refField"), refMode: $("optRef"),
+  autoSave: $("optAutoSave"), featherVal: $("featherVal"), smoothVal: $("smoothVal"), refs: $("refs"), refField: $("refField"), refMode: $("optRef"),
 };
 
 const state = { sources: [], selected: 0, lastRefs: [], imgLm: null, picLm: null, vidLm: null, vidLmFaces: 0, photo: null, source: null, videoFile: null, videoURL: null,
@@ -932,7 +933,13 @@ async function run() {
     ui.result.src = url; ui.result.hidden = false; ui.out.hidden = true;
     showExport();
     ui.barFill.style.width = "100%";
-    setStatus(`Done · ${(blob.size / 1048576).toFixed(1)} MB`);
+    const fname = `${copyName()}.${state.result.ext}`;
+    if (ui.autoSave.checked) {
+      saveBlob(blob, fname);
+      setStatus(`Done · saved ${fname} (${(blob.size / 1048576).toFixed(1)} MB) to your downloads`);
+    } else {
+      setStatus(`Done · ${(blob.size / 1048576).toFixed(1)} MB · click Export to save it`);
+    }
   } catch (e) {
     console.error(e);
     setStatus("Something went wrong: " + (e.message || e) + ". Try a shorter clip or a smaller output size.", true);
@@ -1040,12 +1047,19 @@ async function exportRealtime({ video, fps, start, end, total, detect, renderFra
 }
 
 // --------------------------------------------------------- picture mode ---
+// "holiday clip.mov" -> "holiday clip-faceswap"
+function copyName() {
+  const name = state.mode === "picture" ? state.targetName : state.videoFile?.name;
+  return (name || "faceswap").replace(/\.[^.]+$/, "") + "-faceswap";
+}
+
 function setMode(mode) {
   state.mode = mode;
   document.querySelector(`input[name=mode][value=${mode}]`).checked = true;
   const pic = mode === "picture";
   ui.targetTitle.textContent = pic ? "Picture" : "Video";
-  ui.targetHint.textContent = pic ? "A photo with one or more faces to replace." : "MP4, MOV or WebM. Try a short clip first.";
+  ui.targetHint.textContent = pic ? "A photo with one or more faces to replace." : "MP4, MOV or WebM. You'll get a copy of it with the face replaced.";
+  ui.startBtn.textContent = "Make face-swapped copy";
   ui.videoInput.accept = pic ? "image/*,video/*" : "video/*,image/*";
   ui.videoPreview.hidden = pic; ui.videoMeta.hidden = pic;
   ui.targetPreview.hidden = !pic || !state.target; ui.targetMeta.hidden = !pic;
@@ -1063,6 +1077,7 @@ async function loadTargetPicture(file) {
   catch { ui.targetMeta.textContent = "That file isn't an image this browser can open."; ui.targetMeta.className = "meta bad"; return; }
   if (state.target) URL.revokeObjectURL(state.target.src);
   state.target = img;
+  state.targetName = file.name;
   ui.targetPreview.src = img.src; ui.targetPreview.hidden = false;
   $("dropVideo").classList.add("filled");
   ui.targetMeta.textContent = `${img.naturalWidth}×${img.naturalHeight} · ${(file.size / 1048576).toFixed(1)} MB`;
@@ -1086,6 +1101,13 @@ async function runPicture() {
     ui.readout.innerHTML = `<span>faces replaced <b>${faces.length}</b></span>${state.sources.length > 1 ? `<span>${state.lastRefs.length > 1 ? "blending photos" : "photo"} <b>${state.lastRefs.map((r) => r + 1).join(", ")}</b></span>` : ""}<span><b>${ui.out.width}×${ui.out.height}</b> px</span><span>settings update the result live</span>`;
     state.result = { kind: "picture" };
     showExport();
+    if (ui.autoSave.checked) {
+      const fname = `${copyName()}.png`;
+      saveBlob(await canvasBlob(ui.out, "image/png"), fname);
+      setStatus(`Done · saved ${fname} to your downloads. Adjust the settings and export again if you like.`);
+      ui.stage.scrollIntoView({ behavior: "auto", block: "start" });
+      return;
+    }
     setStatus("Done. Adjust the settings to fine-tune, then export.");
     ui.stage.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   } catch (e) {
@@ -1137,15 +1159,15 @@ ui.exportBtn.addEventListener("click", async () => {
   if (!r) return;
   try {
     if (r.kind === "video" && !fmt.startsWith("frame")) {
-      saveBlob(r.blob, `faceswap-${stamp()}.${r.ext}`);
+      saveBlob(r.blob, `${copyName()}.${r.ext}`);
     } else if (r.kind === "video") {
       const ext = fmt.split("-")[1], v = ui.result, c = document.createElement("canvas");
       c.width = v.videoWidth; c.height = v.videoHeight;
       c.getContext("2d").drawImage(v, 0, 0);
-      saveBlob(await canvasBlob(c, MIME[ext], 0.92), `faceswap-frame-${v.currentTime.toFixed(2)}s.${ext}`);
+      saveBlob(await canvasBlob(c, MIME[ext], 0.92), `${copyName()}-frame-${v.currentTime.toFixed(2)}s.${ext}`);
     } else {
       drawPicture(); // make sure the canvas holds the latest render
-      saveBlob(await canvasBlob(ui.out, MIME[fmt], 0.92), `faceswap-${stamp()}.${fmt}`);
+      saveBlob(await canvasBlob(ui.out, MIME[fmt], 0.92), `${copyName()}.${fmt}`);
     }
     setStatus("Exported.");
   } catch (e) { setStatus("Export failed: " + (e.message || e), true); }
