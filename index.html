@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Face Swap Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a single working column — inputs, settings, then a large stage that shows the live render and the finished file. */
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --ink: #141a24;
+  --muted: #5b6676;
+  --line: #d5dbe4;
+  --accent: #2b50d8;
+  --accent-ink: #ffffff;
+  --ok: #1d7a4c;
+  --warn: #b25b00;
+  --bad: #b3261e;
+  --stage: #0d1118;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131a; --surface: #171c25; --ink: #e7ebf2; --muted: #8f9aab; --line: #2a3240;
+    --accent: #7d97ff; --accent-ink: #0b0f16; --ok: #5fcf95; --warn: #f0a14a; --bad: #ff7b72; --stage: #07090d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f131a; --surface: #171c25; --ink: #e7ebf2; --muted: #8f9aab; --line: #2a3240;
+  --accent: #7d97ff; --accent-ink: #0b0f16; --ok: #5fcf95; --warn: #f0a14a; --bad: #ff7b72; --stage: #07090d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 48px;
+}
+[hidden] { display: none !important; }
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 28px; }
+header { display: grid; gap: 6px; }
+h1 { font: 800 clamp(2rem, 5vw, 3.2rem)/1.02 var(--f-display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); max-width: 62ch; margin: 0; }
+.label { font: 600 0.72rem/1 var(--f-mono); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+
+.inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.drop {
+  position: relative; display: grid; gap: 12px; align-content: start;
+  background: var(--surface); border: 1.5px dashed var(--line); border-radius: 14px; padding: 18px;
+  min-width: 0; transition: border-color .15s;
+}
+.drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop.filled { border-style: solid; }
+.drop h2 { font: 700 1.25rem/1.2 var(--f-display); margin: 0; }
+.drop p { margin: 0; color: var(--muted); font-size: .92rem; }
+.drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.thumb { width: 100%; max-width: 100%; aspect-ratio: 4 / 3; background: var(--stage); border-radius: 10px; overflow: hidden; display: grid; place-items: center; }
+.thumb canvas, .thumb video { max-width: 100%; max-height: 100%; display: block; }
+.meta { font: 400 .8rem/1.4 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.meta.ok { color: var(--ok); } .meta.bad { color: var(--bad); }
+
+.settings { display: grid; gap: 14px 22px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field select, .field input[type=number] {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; width: 100%;
+}
+.field input[type=range] { width: 100%; accent-color: var(--accent); }
+.check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 18px; height: 18px; margin-top: 3px; flex: none; }
+.check small { display: block; color: var(--muted); }
+.rangeval { font: 600 .8rem var(--f-mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+button, .btn {
+  font: 700 1rem/1 var(--f-body); border-radius: 999px; padding: 13px 22px; cursor: pointer;
+  border: 1.5px solid var(--accent); background: var(--accent); color: var(--accent-ink); text-decoration: none;
+}
+button.ghost, .btn.ghost { background: transparent; color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, .btn:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.status { color: var(--muted); font-size: .92rem; }
+.status.bad { color: var(--bad); }
+
+.stage { display: grid; gap: 12px; }
+.screen { background: var(--stage); border-radius: 14px; overflow: hidden; display: grid; place-items: center; min-height: 220px; }
+.screen canvas, .screen video { display: block; max-width: 100%; max-height: 70vh; }
+.bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 .85rem var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+footer { color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 16px; max-width: 70ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="label">Runs in your browser · nothing is uploaded</span>
+    <h1>Face Swap Studio</h1>
+    <p class="lede">Pick a photo of a face and a video. Every face the video shows is mapped to 478 landmarks, and the photo's face is warped onto it frame by frame, matching pose, expression and skin tone.</p>
+  </header>
+
+  <section class="inputs">
+    <label class="drop" id="dropPhoto">
+      <span class="label">1 · New face</span>
+      <h2>Photo</h2>
+      <p>A clear, front-facing, evenly lit photo works best.</p>
+      <div class="thumb"><canvas id="photoCanvas" width="400" height="300"></canvas></div>
+      <div class="meta" id="photoMeta">JPG, PNG or WebP</div>
+      <input type="file" id="photoInput" accept="image/*" aria-label="Choose photo">
+    </label>
+    <label class="drop" id="dropVideo">
+      <span class="label">2 · Footage</span>
+      <h2>Video</h2>
+      <p>MP4, MOV or WebM. Try a short clip first.</p>
+      <div class="thumb"><video id="videoPreview" muted playsinline preload="auto"></video></div>
+      <div class="meta" id="videoMeta">No video selected</div>
+      <input type="file" id="videoInput" accept="video/*" aria-label="Choose video">
+    </label>
+  </section>
+
+  <section class="settings" aria-label="Settings">
+    <div class="field">
+      <span class="label">Faces to replace</span>
+      <select id="optFaces">
+        <option value="1">Largest face only</option>
+        <option value="5">Every face (up to 5)</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="label">Output size</span>
+      <select id="optSize">
+        <option value="720">Up to 720p</option>
+        <option value="1080" selected>Up to 1080p</option>
+        <option value="0">Original</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="label">Frame rate</span>
+      <select id="optFps">
+        <option value="24">24 fps</option>
+        <option value="25">25 fps</option>
+        <option value="30" selected>30 fps</option>
+        <option value="60">60 fps</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="label">Start / length (seconds, 0 = all)</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input type="number" id="optStart" min="0" step="0.5" value="0" aria-label="Start time in seconds">
+        <input type="number" id="optDur" min="0" step="0.5" value="0" aria-label="Length in seconds">
+      </div>
+    </div>
+    <div class="field">
+      <span class="label">Edge softness <span class="rangeval" id="featherVal"></span></span>
+      <input type="range" id="optFeather" min="2" max="30" value="12">
+    </div>
+    <div class="field">
+      <span class="label">Steadiness <span class="rangeval" id="smoothVal"></span></span>
+      <input type="range" id="optSmooth" min="0" max="90" value="50">
+    </div>
+    <label class="check"><input type="checkbox" id="optColor" checked><span>Match skin tone<small>Adapts the face to the video's lighting.</small></span></label>
+    <label class="check"><input type="checkbox" id="optMouth" checked><span>Keep the video's mouth<small>Shows real teeth and tongue when the person talks.</small></span></label>
+  </section>
+
+  <div class="actions">
+    <button id="startBtn" disabled>Swap faces</button>
+    <button id="cancelBtn" class="ghost" hidden>Stop</button>
+    <span class="status" id="status">Loading face model…</span>
+  </div>
+
+  <section class="stage" id="stage" hidden>
+    <div class="screen"><canvas id="out"></canvas><video id="result" controls playsinline hidden></video></div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="readout" id="readout"></div>
+    <div class="actions" id="doneActions" hidden>
+      <a class="btn" id="downloadLink" download="faceswap.mp4">Download video</a>
+      <button class="ghost" id="againBtn">Make another</button>
+    </div>
+  </section>
+
+  <footer>Use only photos and footage you have permission to use, and label swapped videos as edited. Rendering uses WebGL and WebCodecs; the newest Chrome, Edge or Safari gives the best speed and keeps the audio.</footer>
+</div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import Delaunator from "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm";
+import { Muxer, ArrayBufferTarget } from "https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/+esm";
+
+const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+
+const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+const INNER_LIPS = [78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95];
+const MESH_N = 468;
+
+const $ = (id) => document.getElementById(id);
+const ui = {
+  photoInput: $("photoInput"), videoInput: $("videoInput"), photoCanvas: $("photoCanvas"), photoMeta: $("photoMeta"),
+  videoPreview: $("videoPreview"), videoMeta: $("videoMeta"), startBtn: $("startBtn"), cancelBtn: $("cancelBtn"),
+  status: $("status"), stage: $("stage"), out: $("out"), result: $("result"), barFill: $("barFill"),
+  readout: $("readout"), doneActions: $("doneActions"), downloadLink: $("downloadLink"), againBtn: $("againBtn"),
+  faces: $("optFaces"), size: $("optSize"), fps: $("optFps"), start: $("optStart"), dur: $("optDur"),
+  feather: $("optFeather"), smooth: $("optSmooth"), color: $("optColor"), mouth: $("optMouth"),
+  featherVal: $("featherVal"), smoothVal: $("smoothVal"),
+};
+
+const state = { imgLm: null, vidLm: null, vidLmFaces: 0, photo: null, source: null, videoFile: null, videoURL: null, cancel: false, busy: false };
+
+function setStatus(text, bad = false) { ui.status.textContent = text; ui.status.classList.toggle("bad", bad); }
+function refreshStart() { ui.startBtn.disabled = !(state.imgLm && state.source && state.videoFile) || state.busy; }
+ui.featherVal.textContent = ui.feather.value + "%"; ui.smoothVal.textContent = ui.smooth.value + "%";
+ui.feather.oninput = () => { ui.featherVal.textContent = ui.feather.value + "%"; if (state.source) buildSourceAlpha(); };
+ui.smooth.oninput = () => { ui.smoothVal.textContent = ui.smooth.value + "%"; };
+
+// ---------------------------------------------------------------- model ---
+let fileset;
+async function makeLandmarker(mode, numFaces) {
+  fileset ??= await FilesetResolver.forVisionTasks(WASM);
+  const opts = (delegate) => ({
+    baseOptions: { modelAssetPath: MODEL, delegate },
+    runningMode: mode, numFaces,
+    minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+  });
+  try { return await FaceLandmarker.createFromOptions(fileset, opts("GPU")); }
+  catch { return await FaceLandmarker.createFromOptions(fileset, opts("CPU")); }
+}
+async function getVideoLandmarker(numFaces) {
+  if (state.vidLm && state.vidLmFaces === numFaces) return state.vidLm;
+  state.vidLm?.close();
+  state.vidLm = await makeLandmarker("VIDEO", numFaces);
+  state.vidLmFaces = numFaces;
+  return state.vidLm;
+}
+(async () => {
+  try {
+    state.imgLm = await makeLandmarker("IMAGE", 1);
+    setStatus("Ready. Choose a photo and a video.");
+  } catch (e) {
+    console.error(e);
+    setStatus("The face model couldn't load. Check your connection and reload the page.", true);
+  }
+  refreshStart();
+})();
+
+// Landmarks -> Float32Array [x0,y0,x1,y1,...] in 0..1 image coordinates.
+function toArray(lms) {
+  const a = new Float32Array(lms.length * 2);
+  lms.forEach((p, i) => { a[2 * i] = p.x; a[2 * i + 1] = p.y; });
+  return a;
+}
+
+// ---------------------------------------------------------------- photo ---
+ui.photoInput.addEventListener("change", async () => {
+  const file = ui.photoInput.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  try { await img.decode(); } catch { ui.photoMeta.textContent = "That file isn't an image this browser can open."; ui.photoMeta.className = "meta bad"; return; }
+  state.photo = img;
+  $("dropPhoto").classList.add("filled");
+  if (!state.imgLm) { ui.photoMeta.textContent = "Waiting for the face model…"; return; }
+  const res = state.imgLm.detect(img);
+  if (!res.faceLandmarks.length) {
+    state.source = null;
+    drawPhotoPreview(img, null);
+    ui.photoMeta.textContent = "No face found. Try a clearer, front-facing photo.";
+    ui.photoMeta.className = "meta bad";
+  } else {
+    const pts = toArray(res.faceLandmarks[0]);
+    state.source = { img, pts, w: img.naturalWidth, h: img.naturalHeight };
+    state.tris = triangulate(pts, img.naturalWidth, img.naturalHeight);
+    buildSourceAlpha();
+    state.source.stats = regionStats(img, pts, img.naturalWidth, img.naturalHeight);
+    drawPhotoPreview(img, pts);
+    ui.photoMeta.textContent = `Face found · ${res.faceLandmarks[0].length} landmarks · ${state.tris.length / 3} triangles`;
+    ui.photoMeta.className = "meta ok";
+  }
+  refreshStart();
+});
+
+function drawPhotoPreview(img, pts) {
+  const c = ui.photoCanvas, ctx = c.getContext("2d");
+  const s = Math.min(800 / img.naturalWidth, 600 / img.naturalHeight, 1);
+  c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  if (!pts) return;
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2b50d8";
+  ctx.globalAlpha = 0.55; ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  const t = state.tris;
+  for (let i = 0; i < t.length; i += 3) {
+    const a = t[i], b = t[i + 1], d = t[i + 2];
+    ctx.moveTo(pts[2 * a] * c.width, pts[2 * a + 1] * c.height);
+    ctx.lineTo(pts[2 * b] * c.width, pts[2 * b + 1] * c.height);
+    ctx.lineTo(pts[2 * d] * c.width, pts[2 * d + 1] * c.height);
+    ctx.closePath();
+  }
+  ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+function triangulate(pts, w, h) {
+  const coords = new Float64Array(MESH_N * 2);
+  for (let i = 0; i < MESH_N; i++) { coords[2 * i] = pts[2 * i] * w; coords[2 * i + 1] = pts[2 * i + 1] * h; }
+  return new Uint16Array(new Delaunator(coords).triangles);
+}
+
+// Per-vertex opacity: 0 on the face outline, rising to 1 inward, for a soft edge.
+function buildSourceAlpha() {
+  const { pts, w, h } = state.source;
+  const P = (i) => [pts[2 * i] * w, pts[2 * i + 1] * h];
+  let minX = 1e9, maxX = -1e9;
+  for (const i of FACE_OVAL) { const [x] = P(i); minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+  const feather = (maxX - minX) * (+ui.feather.value / 100);
+  const alpha = new Float32Array(MESH_N);
+  for (let i = 0; i < MESH_N; i++) {
+    const [x, y] = P(i);
+    let d = 1e9;
+    for (let k = 0; k < FACE_OVAL.length; k++) {
+      const [ax, ay] = P(FACE_OVAL[k]), [bx, by] = P(FACE_OVAL[(k + 1) % FACE_OVAL.length]);
+      const vx = bx - ax, vy = by - ay, L = vx * vx + vy * vy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / L));
+      d = Math.min(d, Math.hypot(x - ax - t * vx, y - ay - t * vy));
+    }
+    const u = Math.min(1, d / Math.max(feather, 1e-3));
+    alpha[i] = u * u * (3 - 2 * u);
+  }
+  state.source.alpha = alpha;
+}
+
+// Mean and spread of color inside the face outline (RGB, 0..1).
+const statCanvas = document.createElement("canvas");
+statCanvas.width = statCanvas.height = 48;
+const statCtx = statCanvas.getContext("2d", { willReadFrequently: true });
+function regionStats(el, pts, w, h) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const i of FACE_OVAL) { const x = pts[2 * i] * w, y = pts[2 * i + 1] * h; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(w, x1); y1 = Math.min(h, y1);
+  const bw = x1 - x0, bh = y1 - y0;
+  if (bw < 4 || bh < 4) return null;
+  const S = 48;
+  statCtx.clearRect(0, 0, S, S);
+  statCtx.save();
+  statCtx.beginPath();
+  FACE_OVAL.forEach((i, k) => {
+    const x = (pts[2 * i] * w - x0) / bw * S, y = (pts[2 * i + 1] * h - y0) / bh * S;
+    k ? statCtx.lineTo(x, y) : statCtx.moveTo(x, y);
+  });
+  statCtx.closePath(); statCtx.clip();
+  statCtx.drawImage(el, x0, y0, bw, bh, 0, 0, S, S);
+  statCtx.restore();
+  const d = statCtx.getImageData(0, 0, S, S).data;
+  const sum = [0, 0, 0], sq = [0, 0, 0]; let n = 0;
+  for (let p = 0; p < d.length; p += 4) {
+    if (d[p + 3] < 250) continue;
+    n++;
+    for (let c = 0; c < 3; c++) { const v = d[p + c] / 255; sum[c] += v; sq[c] += v * v; }
+  }
+  if (n < 30) return null;
+  const mean = sum.map((s) => s / n);
+  const std = sq.map((s, c) => Math.sqrt(Math.max(1e-6, s / n - mean[c] * mean[c])));
+  return { mean, std };
+}
+
+// ---------------------------------------------------------------- video ---
+ui.videoInput.addEventListener("change", async () => {
+  const file = ui.videoInput.files[0];
+  if (!file) return;
+  if (state.videoURL) URL.revokeObjectURL(state.videoURL);
+  state.videoFile = file;
+  state.videoURL = URL.createObjectURL(file);
+  const v = ui.videoPreview;
+  v.src = state.videoURL;
+  $("dropVideo").classList.add("filled");
+  try {
+    await once(v, "loadedmetadata");
+    v.currentTime = Math.min(0.5, v.duration / 2);
+    ui.videoMeta.textContent = `${v.videoWidth}×${v.videoHeight} · ${fmtTime(v.duration)} · ${(file.size / 1048576).toFixed(1)} MB`;
+    ui.videoMeta.className = "meta ok";
+  } catch {
+    state.videoFile = null;
+    ui.videoMeta.textContent = "This browser can't play that video. Try an MP4 (H.264).";
+    ui.videoMeta.className = "meta bad";
+  }
+  refreshStart();
+});
+
+function once(el, ev, timeout = 15000) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => { cleanup(); rej(new Error(ev + " timed out")); }, timeout);
+    const ok = () => { cleanup(); res(); }, bad = () => { cleanup(); rej(new Error("media error")); };
+    const cleanup = () => { clearTimeout(t); el.removeEventListener(ev, ok); el.removeEventListener("error", bad); };
+    el.addEventListener(ev, ok); el.addEventListener("error", bad);
+  });
+}
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+// ---------------------------------------------------------------- WebGL ---
+const VS = `
+attribute vec2 a_pos; attribute vec2 a_uv; attribute float a_alpha;
+uniform vec2 u_res; varying vec2 v_uv; varying float v_alpha;
+void main(){ vec2 c = a_pos / u_res * 2.0 - 1.0; gl_Position = vec4(c.x, -c.y, 0.0, 1.0); v_uv = a_uv; v_alpha = a_alpha; }`;
+const FS = `
+precision mediump float;
+uniform sampler2D u_tex; uniform vec3 u_gain; uniform vec3 u_off; varying vec2 v_uv; varying float v_alpha;
+void main(){ vec3 c = texture2D(u_tex, v_uv).rgb * u_gain + u_off; gl_FragColor = vec4(clamp(c, 0.0, 1.0), v_alpha); }`;
+
+class Renderer {
+  constructor(canvas) {
+    const gl = canvas.getContext("webgl", { premultipliedAlpha: false, preserveDrawingBuffer: true, alpha: false });
+    if (!gl) throw new Error("WebGL is not available in this browser.");
+    this.gl = gl; this.canvas = canvas;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(p);
+    gl.useProgram(p);
+    this.loc = {
+      pos: gl.getAttribLocation(p, "a_pos"), uv: gl.getAttribLocation(p, "a_uv"), alpha: gl.getAttribLocation(p, "a_alpha"),
+      res: gl.getUniformLocation(p, "u_res"), gain: gl.getUniformLocation(p, "u_gain"), off: gl.getUniformLocation(p, "u_off"),
+    };
+    this.bPos = gl.createBuffer(); this.bUv = gl.createBuffer(); this.bAlpha = gl.createBuffer(); this.bIdx = gl.createBuffer();
+    this.texFrame = this.makeTex(); this.texSrc = this.makeTex();
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+  makeTex() {
+    const gl = this.gl, t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    for (const [k, v] of [[gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    return t;
+  }
+  upload(tex, el) { const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el); }
+  setSize(w, h) { this.canvas.width = w; this.canvas.height = h; this.gl.viewport(0, 0, w, h); }
+  draw(tex, pos, uv, alpha, idx, gain = [1, 1, 1], off = [0, 0, 0]) {
+    const gl = this.gl, L = this.loc;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform2f(L.res, this.canvas.width, this.canvas.height);
+    gl.uniform3fv(L.gain, gain); gl.uniform3fv(L.off, off);
+    const attr = (buf, loc, data, size) => { gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0); };
+    attr(this.bPos, L.pos, pos, 2); attr(this.bUv, L.uv, uv, 2); attr(this.bAlpha, L.alpha, alpha, 1);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.bIdx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+  }
+  drawFrame() {
+    const w = this.canvas.width, h = this.canvas.height;
+    this.draw(this.texFrame, new Float32Array([0, 0, w, 0, w, h, 0, h]), new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+      new Float32Array([1, 1, 1, 1]), new Uint16Array([0, 1, 2, 0, 2, 3]));
+  }
+}
+
+// Exponential smoothing per tracked face, easing off when the head moves fast.
+class Smoother {
+  constructor(strength) { this.a = 1 - Math.min(0.95, Math.max(0, strength)); this.tracks = []; }
+  centroid(f) { let x = 0, y = 0; for (let i = 0; i < MESH_N; i++) { x += f[2 * i]; y += f[2 * i + 1]; } return [x / MESH_N, y / MESH_N]; }
+  width(f) { let a = 1e9, b = -1e9; for (let i = 0; i < MESH_N; i++) { a = Math.min(a, f[2 * i]); b = Math.max(b, f[2 * i]); } return b - a + 1e-6; }
+  apply(faces) {
+    if (this.a >= 1 || !faces.length) { this.tracks = faces; return faces; }
+    const out = [], used = new Set();
+    for (const f of faces) {
+      const [cx, cy] = this.centroid(f), size = this.width(f);
+      let best = -1, bestD = Infinity;
+      this.tracks.forEach((t, i) => {
+        if (used.has(i)) return;
+        const [tx, ty] = this.centroid(t), d = Math.hypot(tx - cx, ty - cy);
+        if (d < 0.5 * size && d < bestD) { best = i; bestD = d; }
+      });
+      if (best < 0) { out.push(f); continue; }
+      used.add(best);
+      const prev = this.tracks[best], a = Math.min(1, this.a + (bestD / size) * 4), g = new Float32Array(f.length);
+      for (let i = 0; i < f.length; i++) g[i] = a * f[i] + (1 - a) * prev[i];
+      out.push(g);
+    }
+    this.tracks = out;
+    return out;
+  }
+}
+
+// ------------------------------------------------------------ rendering ---
+function faceArea(f) {
+  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+  for (const i of FACE_OVAL) { x0 = Math.min(x0, f[2 * i]); x1 = Math.max(x1, f[2 * i]); y0 = Math.min(y0, f[2 * i + 1]); y1 = Math.max(y1, f[2 * i + 1]); }
+  return (x1 - x0) * (y1 - y0);
+}
+
+function makeFrameRenderer(renderer, opts) {
+  const src = state.source, tris = state.tris;
+  const uv = src.pts.slice(0, MESH_N * 2);
+  const mouthIdx = new Uint16Array(INNER_LIPS.length * 3);
+  INNER_LIPS.forEach((_, k) => { mouthIdx.set([INNER_LIPS.length, k, (k + 1) % INNER_LIPS.length], k * 3); });
+  const colorEMA = new Map(); // per tracked slot
+  renderer.upload(renderer.texSrc, src.img);
+
+  return function renderFrame(videoEl, faces) {
+    const W = renderer.canvas.width, H = renderer.canvas.height;
+    renderer.upload(renderer.texFrame, videoEl);
+    renderer.drawFrame();
+    faces.forEach((f, slot) => {
+      if (faceArea(f) < 0.0004) return;
+      const pos = new Float32Array(MESH_N * 2);
+      for (let i = 0; i < MESH_N; i++) { pos[2 * i] = f[2 * i] * W; pos[2 * i + 1] = f[2 * i + 1] * H; }
+      let gain = [1, 1, 1], off = [0, 0, 0];
+      if (opts.color && src.stats) {
+        const t = regionStats(videoEl, f, videoEl.videoWidth, videoEl.videoHeight);
+        if (t) {
+          const prev = colorEMA.get(slot);
+          const m = prev ? t.mean.map((v, c) => 0.7 * prev.mean[c] + 0.3 * v) : t.mean;
+          const s = prev ? t.std.map((v, c) => 0.7 * prev.std[c] + 0.3 * v) : t.std;
+          colorEMA.set(slot, { mean: m, std: s });
+          gain = s.map((v, c) => Math.min(2, Math.max(0.5, v / src.stats.std[c])));
+          off = m.map((v, c) => v - src.stats.mean[c] * gain[c]);
+        }
+      }
+      renderer.draw(renderer.texSrc, pos, uv, src.alpha, tris, gain, off);
+      if (opts.mouth) {
+        const n = INNER_LIPS.length, mp = new Float32Array((n + 1) * 2), muv = new Float32Array((n + 1) * 2);
+        let cx = 0, cy = 0;
+        INNER_LIPS.forEach((i, k) => { mp[2 * k] = f[2 * i] * W; mp[2 * k + 1] = f[2 * i + 1] * H; muv[2 * k] = f[2 * i]; muv[2 * k + 1] = f[2 * i + 1]; cx += f[2 * i]; cy += f[2 * i + 1]; });
+        cx /= n; cy /= n;
+        mp[2 * n] = cx * W; mp[2 * n + 1] = cy * H; muv[2 * n] = cx; muv[2 * n + 1] = cy;
+        renderer.draw(renderer.texFrame, mp, muv, new Float32Array(n + 1).fill(1), mouthIdx);
+      }
+    });
+  };
+}
+
+// --------------------------------------------------------------- export ---
+async function decodeAudio(file, start, end) {
+  try {
+    const buf = await new OfflineAudioContext(2, 48000, 48000).decodeAudioData(await file.arrayBuffer());
+    const sr = buf.sampleRate, a = Math.floor(start * sr), b = Math.min(buf.length, Math.floor(end * sr));
+    if (b - a < sr * 0.05) return null;
+    return { buf, sr, a, b, ch: Math.min(2, buf.numberOfChannels) };
+  } catch { return null; }
+}
+
+async function pickVideoCodec(W, H, fps) {
+  const avc = ["avc1.640034", "avc1.640033", "avc1.4d0033", "avc1.640028", "avc1.42003e", "avc1.42001f"];
+  for (const codec of avc) {
+    try { if ((await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 8e6, framerate: fps })).supported) return { codec, mux: "avc" }; } catch {}
+  }
+  try { if ((await VideoEncoder.isConfigSupported({ codec: "vp09.00.40.08", width: W, height: H, bitrate: 8e6, framerate: fps })).supported) return { codec: "vp09.00.40.08", mux: "vp9" }; } catch {}
+  return null;
+}
+async function pickAudioCodec(sr, ch) {
+  if (typeof AudioEncoder === "undefined") return null;
+  for (const [codec, mux] of [["mp4a.40.2", "aac"], ["opus", "opus"]]) {
+    try { if ((await AudioEncoder.isConfigSupported({ codec, sampleRate: sr, numberOfChannels: ch, bitrate: 160000 })).supported) return { codec, mux }; } catch {}
+  }
+  return null;
+}
+
+async function run() {
+  state.busy = true; state.cancel = false; refreshStart();
+  ui.cancelBtn.hidden = false; ui.stage.hidden = false; ui.doneActions.hidden = true;
+  ui.result.hidden = true; ui.out.hidden = false; ui.barFill.style.width = "0";
+  ui.stage.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.preload = "auto"; video.src = state.videoURL;
+  try {
+    setStatus("Preparing…");
+    await once(video, "loadeddata");
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const maxH = +ui.size.value || vh, scale = Math.min(1, maxH / Math.min(vw, vh));
+    const W = Math.max(2, Math.round(vw * scale / 2) * 2), H = Math.max(2, Math.round(vh * scale / 2) * 2);
+    const fps = +ui.fps.value;
+    const start = Math.min(Math.max(0, +ui.start.value || 0), Math.max(0, video.duration - 0.1));
+    const end = +ui.dur.value > 0 ? Math.min(video.duration, start + +ui.dur.value) : video.duration;
+    const total = Math.max(1, Math.floor((end - start) * fps));
+
+    const lm = await getVideoLandmarker(+ui.faces.value === 1 ? 2 : +ui.faces.value);
+    const renderer = new Renderer(ui.out);
+    renderer.setSize(W, H);
+    const renderFrame = makeFrameRenderer(renderer, { color: ui.color.checked, mouth: ui.mouth.checked });
+    const smoother = new Smoother(+ui.smooth.value / 100);
+    const onlyLargest = +ui.faces.value === 1;
+    // MediaPipe needs strictly increasing timestamps, also across runs.
+    const detect = () => {
+      state.lastTs = (state.lastTs || 0) + Math.round(1000 / fps);
+      const r = lm.detectForVideo(video, state.lastTs);
+      let faces = r.faceLandmarks.map(toArray);
+      if (onlyLargest && faces.length > 1) faces = [faces.reduce((a, b) => faceArea(a) >= faceArea(b) ? a : b)];
+      return smoother.apply(faces);
+    };
+
+    let blob, type;
+    if (typeof VideoEncoder !== "undefined" && typeof VideoFrame !== "undefined" && (await pickVideoCodec(W, H, fps))) {
+      ({ blob, type } = await exportWebCodecs({ video, W, H, fps, start, end, total, detect, renderFrame }));
+    } else {
+      ({ blob, type } = await exportRealtime({ video, fps, start, end, total, detect, renderFrame }));
+    }
+    if (state.cancel) { setStatus("Stopped."); return; }
+    const url = URL.createObjectURL(blob);
+    ui.result.src = url; ui.result.hidden = false; ui.out.hidden = true;
+    ui.downloadLink.href = url;
+    ui.downloadLink.download = type.includes("webm") ? "faceswap.webm" : "faceswap.mp4";
+    ui.doneActions.hidden = false;
+    ui.barFill.style.width = "100%";
+    setStatus(`Done · ${(blob.size / 1048576).toFixed(1)} MB`);
+  } catch (e) {
+    console.error(e);
+    setStatus("Something went wrong: " + (e.message || e) + ". Try a shorter clip or a smaller output size.", true);
+  } finally {
+    state.busy = false; ui.cancelBtn.hidden = true; refreshStart();
+    video.removeAttribute("src"); video.load();
+  }
+}
+
+function progress(i, total, t0, faces) {
+  const el = (performance.now() - t0) / 1000, rate = i / Math.max(el, 1e-3);
+  ui.barFill.style.width = (100 * i / total).toFixed(1) + "%";
+  ui.readout.innerHTML = `<span>frame <b>${i}</b> / ${total}</span><span><b>${rate.toFixed(1)}</b> fps</span>` +
+    `<span>faces <b>${faces}</b></span><span>left <b>${fmtTime(Math.max(0, (total - i) / Math.max(rate, 0.01)))}</b></span>`;
+}
+
+async function exportWebCodecs({ video, W, H, fps, start, end, total, detect, renderFrame }) {
+  setStatus("Reading audio…");
+  const audio = await decodeAudio(state.videoFile, start, end);
+  const vcodec = await pickVideoCodec(W, H, fps);
+  const acodec = audio ? await pickAudioCodec(audio.sr, audio.ch) : null;
+
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target, fastStart: "in-memory", firstTimestampBehavior: "offset",
+    video: { codec: vcodec.mux, width: W, height: H, frameRate: fps },
+    ...(acodec ? { audio: { codec: acodec.mux, sampleRate: audio.sr, numberOfChannels: audio.ch } } : {}),
+  });
+  let encErr = null;
+  const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => { encErr = e; } });
+  venc.configure({ codec: vcodec.codec, width: W, height: H, bitrate: Math.round(W * H * fps * 0.15), framerate: fps });
+
+  setStatus("Swapping faces…");
+  const t0 = performance.now(), dt = 1e6 / fps;
+  for (let i = 0; i < total; i++) {
+    if (state.cancel) break;
+    if (encErr) throw encErr;
+    video.currentTime = start + (i + 0.5) / fps;
+    await once(video, "seeked");
+    const faces = detect();
+    renderFrame(video, faces);
+    const frame = new VideoFrame(ui.out, { timestamp: Math.round(i * dt), duration: Math.round(dt) });
+    venc.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+    frame.close();
+    while (venc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 4));
+    progress(i + 1, total, t0, faces.length);
+  }
+  await venc.flush(); venc.close();
+  if (state.cancel) return {};
+
+  if (acodec) {
+    setStatus("Adding audio…");
+    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => { encErr = e; } });
+    aenc.configure({ codec: acodec.codec, sampleRate: audio.sr, numberOfChannels: audio.ch, bitrate: 160000 });
+    const { buf, sr, a, b, ch } = audio, step = 4096;
+    const stop = Math.min(b, a + Math.round(total / fps * sr));
+    for (let s = a; s < stop; s += step) {
+      const n = Math.min(step, stop - s), data = new Float32Array(n * ch);
+      for (let c = 0; c < ch; c++) data.set(buf.getChannelData(c).subarray(s, s + n), c * n);
+      const ad = new AudioData({ format: "f32-planar", sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round((s - a) / sr * 1e6), data });
+      aenc.encode(ad); ad.close();
+    }
+    await aenc.flush(); aenc.close();
+  }
+  if (encErr) throw encErr;
+  muxer.finalize();
+  if (!acodec) setStatus("Done (this video has no audio track, or this browser can't encode audio).");
+  return { blob: new Blob([target.buffer], { type: "video/mp4" }), type: "video/mp4" };
+}
+
+// Fallback for browsers without WebCodecs: render while the video plays and record the canvas.
+async function exportRealtime({ video, fps, start, end, total, detect, renderFrame }) {
+  setStatus("Swapping faces in real time (this browser can't encode faster)…");
+  const stream = ui.out.captureStream(fps);
+  let actx;
+  try {
+    actx = new AudioContext();
+    const dest = actx.createMediaStreamDestination();
+    actx.createMediaElementSource(video).connect(dest);
+    video.muted = false;
+    dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+  } catch { video.muted = true; }
+  const mime = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : {});
+  const chunks = []; rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  video.currentTime = start; await once(video, "seeked");
+  rec.start(500); await video.play();
+  const t0 = performance.now(); let i = 0;
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (state.cancel || video.ended || video.currentTime >= end) { resolve(); return; }
+      const faces = detect();
+      renderFrame(video, faces);
+      progress(Math.min(total, Math.round((video.currentTime - start) * fps)), total, t0, faces.length);
+      i++;
+      video.requestVideoFrameCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  video.pause();
+  await new Promise((r) => { rec.onstop = r; rec.stop(); });
+  actx?.close();
+  const type = rec.mimeType || "video/webm";
+  return { blob: new Blob(chunks, { type }), type };
+}
+
+ui.startBtn.addEventListener("click", run);
+ui.cancelBtn.addEventListener("click", () => { state.cancel = true; setStatus("Stopping…"); });
+ui.againBtn.addEventListener("click", () => { ui.stage.hidden = true; window.scrollTo({ top: 0 }); });
+for (const id of ["dropPhoto", "dropVideo"]) {
+  const el = $(id);
+  el.addEventListener("dragover", () => el.classList.add("over"));
+  el.addEventListener("dragleave", () => el.classList.remove("over"));
+  el.addEventListener("drop", () => el.classList.remove("over"));
+}
+</script>
+</body>
+</html>
