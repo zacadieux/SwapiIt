@@ -268,6 +268,9 @@ const ui = {
   autoSave: $("optAutoSave"), featherVal: $("featherVal"), smoothVal: $("smoothVal"), refs: $("refs"), refField: $("refField"), refMode: $("optRef"),
 };
 
+const faceCanvas = document.createElement("canvas"); // WebGL face layer (not shown)
+let _octx = null;
+const outCtx = () => (_octx ??= ui.out.getContext("2d", { alpha: false }));
 const state = { sources: [], selected: 0, lastRefs: [], imgLm: null, picLm: null, vidLm: null, vidLmFaces: 0, photo: null, source: null, videoFile: null, videoURL: null,
   target: null, mode: "video", result: null, renderer: null, cancel: false, busy: false };
 
@@ -636,7 +639,7 @@ void main(){ vec3 c = texture2D(u_tex, v_uv).rgb * u_gain + u_off; gl_FragColor 
 
 class Renderer {
   constructor(canvas) {
-    const gl = canvas.getContext("webgl", { premultipliedAlpha: false, preserveDrawingBuffer: true, alpha: false });
+    const gl = canvas.getContext("webgl", { premultipliedAlpha: true, preserveDrawingBuffer: true, alpha: true, antialias: true });
     if (!gl) throw new Error("WebGL is not available in this browser.");
     this.gl = gl; this.canvas = canvas;
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
@@ -649,7 +652,9 @@ class Renderer {
     };
     this.bPos = gl.createBuffer(); this.bUv = gl.createBuffer(); this.bAlpha = gl.createBuffer(); this.bIdx = gl.createBuffer();
     this.texFrame = this.makeTex(); this.texSrc = this.makeTex();
-    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.BLEND);
+    // Premultiplied "over" so the transparent face layer composites correctly onto the frame.
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
   makeTex() {
     const gl = this.gl, t = gl.createTexture();
@@ -658,7 +663,11 @@ class Renderer {
     return t;
   }
   upload(tex, el) { const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el); }
-  setSize(w, h) { this.canvas.width = w; this.canvas.height = h; this.gl.viewport(0, 0, w, h); }
+  setSize(w, h) {
+    this.canvas.width = w; this.canvas.height = h; this.gl.viewport(0, 0, w, h);
+    ui.out.width = w; ui.out.height = h;
+  }
+  clear() { const gl = this.gl; gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
   draw(tex, pos, uv, alpha, idx, gain = [1, 1, 1], off = [0, 0, 0], opacity = 1) {
     const gl = this.gl, L = this.loc;
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -831,8 +840,8 @@ function makeFrameRenderer(renderer, opts) {
   const renderFrame = function (videoEl, faces) {
     const used = [];
     const W = renderer.canvas.width, H = renderer.canvas.height;
-    renderer.upload(renderer.texFrame, videoEl);
-    renderer.drawFrame();
+    renderer.upload(renderer.texFrame, videoEl); // used only for the "keep the original mouth" patch
+    renderer.clear();
     faces.forEach((f, slot) => {
       if (faceArea(f) < 0.0004) return;
       const refs = pickRefs(f, slot);
@@ -877,6 +886,13 @@ function makeFrameRenderer(renderer, opts) {
         renderer.draw(renderer.texFrame, mp, muv, new Float32Array(n + 1).fill(1), mouthIdx);
       }
     });
+    // Compose: the untouched video frame first, then the face layer on top. Plain 2D canvas
+    // drawing is the most compatible path in every browser (Firefox included).
+    const octx = outCtx();
+    octx.globalCompositeOperation = "copy";
+    octx.drawImage(videoEl, 0, 0, W, H);
+    octx.globalCompositeOperation = "source-over";
+    octx.drawImage(renderer.canvas, 0, 0, W, H);
     state.lastRefs = [...new Set(used)];
     return used;
   };
@@ -894,13 +910,48 @@ async function decodeAudio(file, start, end) {
   } catch { return null; }
 }
 
+// Encode a test picture and decode it back; reject encoders that return blank or wrong frames.
+async function encoderWorks(codec, W, H, fps) {
+  if (typeof VideoDecoder === "undefined") return true;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d", { alpha: false });
+  x.fillStyle = "rgb(200,120,40)"; x.fillRect(0, 0, W, H);
+  x.fillStyle = "rgb(40,90,220)"; x.fillRect(0, 0, W / 2, H);
+  let chunk = null, cfg = null, decoded = null;
+  try {
+    const enc = new VideoEncoder({ output: (ch, m) => { chunk ??= ch; if (m?.decoderConfig) cfg ??= m.decoderConfig; }, error: () => {} });
+    enc.configure({ codec, width: W, height: H, bitrate: 4e6, framerate: fps });
+    const f = new VideoFrame(c, { timestamp: 0 });
+    enc.encode(f, { keyFrame: true }); f.close();
+    await enc.flush(); enc.close();
+    if (!chunk || !cfg) return false;
+    const dec = new VideoDecoder({ output: (fr) => {
+      const p = document.createElement("canvas"); p.width = 4; p.height = 1;
+      const px = p.getContext("2d", { willReadFrequently: true });
+      px.drawImage(fr, 0, 0, 4, 1); decoded = px.getImageData(0, 0, 4, 1).data; fr.close();
+    }, error: () => {} });
+    dec.configure(cfg); dec.decode(chunk); await dec.flush(); dec.close();
+  } catch { return false; }
+  if (!decoded) return false;
+  const near = (i, r, g, b) => Math.abs(decoded[i] - r) + Math.abs(decoded[i + 1] - g) + Math.abs(decoded[i + 2] - b) < 90;
+  return near(0, 40, 90, 220) && near(12, 200, 120, 40);
+}
+
 async function pickVideoCodec(W, H, fps) {
-  const avc = ["avc1.640034", "avc1.640033", "avc1.4d0033", "avc1.640028", "avc1.42003e", "avc1.42001f"];
-  for (const codec of avc) {
-    try { if ((await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 8e6, framerate: fps })).supported) return { codec, mux: "avc" }; } catch {}
+  if (state.codecFor === `${W}x${H}@${fps}`) return state.codec;
+  const firefox = /firefox/i.test(navigator.userAgent);
+  // Firefox's H.264 encoder supports only the baseline profile.
+  const high = ["avc1.640034", "avc1.640033", "avc1.640028", "avc1.4d0033", "avc1.4d0028"];
+  const base = ["avc1.42e034", "avc1.42e033", "avc1.42e028", "avc1.42e01f", "avc1.42003e", "avc1.42001f"];
+  const list = [...(firefox ? base : [...high, ...base]).map((c) => [c, "avc"]), ["vp09.00.40.08", "vp9"], ["vp09.00.31.08", "vp9"]];
+  let pick = null;
+  for (const [codec, mux] of list) {
+    let ok = false;
+    try { ok = (await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 8e6, framerate: fps })).supported; } catch {}
+    if (ok && (await encoderWorks(codec, W, H, fps))) { pick = { codec, mux }; break; }
   }
-  try { if ((await VideoEncoder.isConfigSupported({ codec: "vp09.00.40.08", width: W, height: H, bitrate: 8e6, framerate: fps })).supported) return { codec: "vp09.00.40.08", mux: "vp9" }; } catch {}
-  return null;
+  state.codecFor = `${W}x${H}@${fps}`; state.codec = pick;
+  return pick;
 }
 async function pickAudioCodec(sr, ch) {
   if (typeof AudioEncoder === "undefined") return null;
@@ -936,7 +987,7 @@ async function run() {
     const total = Math.max(1, Math.floor((end - start) * fps));
 
     const lm = await getVideoLandmarker(+ui.faces.value === 1 ? 2 : +ui.faces.value);
-    const renderer = (state.renderer ??= new Renderer(ui.out));
+    const renderer = (state.renderer ??= new Renderer(faceCanvas));
     renderer.setSize(W, H);
     const renderFrame = makeFrameRenderer(renderer, { color: ui.color.value, mouth: ui.mouth.checked, likeness: +ui.like.value / 100 });
     const smoother = new Smoother(+ui.smooth.value / 100);
@@ -1055,7 +1106,9 @@ async function exportWebCodecs({ video, W, H, fps, start, end, total, detect, re
 // Fallback for browsers without WebCodecs: render while the video plays and record the canvas.
 async function exportRealtime({ video, fps, start, end, total, detect, renderFrame }) {
   setStatus("Swapping faces in real time (this browser can't encode faster)…");
-  const stream = ui.out.captureStream(fps);
+  const cap = ui.out.captureStream || ui.out.mozCaptureStream;
+  if (!cap) throw new Error("this browser can't record video from the page");
+  const stream = cap.call(ui.out, fps);
   let actx;
   try {
     actx = new AudioContext();
@@ -1064,20 +1117,30 @@ async function exportRealtime({ video, fps, start, end, total, detect, renderFra
     video.muted = false;
     dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
   } catch { video.muted = true; }
-  const mime = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+  const mime = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m)) || "";
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : {});
   const chunks = []; rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   video.currentTime = start; await once(video, "seeked");
-  rec.start(500); await video.play();
-  const t0 = performance.now(); let i = 0;
+  // Draw the first frame before recording starts, so the file never opens on a blank frame.
+  { const img = grabFrame(video); renderFrame(img, detect(img)); }
+  rec.start(500);
+  try { await video.play(); }
+  catch { video.muted = true; await video.play(); } // sound blocked: record without it rather than stall
+  const t0 = performance.now();
   await new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearInterval(watch); video.removeEventListener("ended", finish); resolve(); };
+    const isOver = () => state.cancel || video.ended || video.currentTime >= end - 0.5 / fps;
+    // No new frames arrive after the last one, so the end is also detected here.
+    const watch = setInterval(() => { if (isOver()) finish(); }, 100);
+    video.addEventListener("ended", finish);
     const tick = () => {
-      if (state.cancel || video.ended || video.currentTime >= end) { resolve(); return; }
+      if (done) return;
+      if (isOver()) { finish(); return; }
       const img = grabFrame(video);
       const faces = detect(img);
       renderFrame(img, faces);
       progress(Math.min(total, Math.round((video.currentTime - start) * fps)), total, t0, faces.length);
-      i++;
       video.requestVideoFrameCallback ? video.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
     };
     tick();
@@ -1162,7 +1225,7 @@ async function runPicture() {
 function drawPicture() {
   const img = state.target, maxSide = 4096;
   const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-  const renderer = (state.renderer ??= new Renderer(ui.out));
+  const renderer = (state.renderer ??= new Renderer(faceCanvas));
   renderer.setSize(Math.round(img.naturalWidth * s), Math.round(img.naturalHeight * s));
   const rf = makeFrameRenderer(renderer, { color: ui.color.value, mouth: ui.mouth.checked, likeness: +ui.like.value / 100 });
   rf(img, state.pictureFaces);
